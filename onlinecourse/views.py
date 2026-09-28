@@ -1,4 +1,54 @@
-from django.shortcuts import render, get_object_or_404
+from django.shortcuts import render, get_object_or_404, redirect
 from django.http import HttpResponseRedirect
 from django.urls import reverse
-from .models import Course, Lesson, Question, Choice, Submission
+from .models import Course, Lesson, Question, Choice, Submission, Enrollment
+
+def course_details(request, course_id):
+    course = get_object_or_404(Course, pk=course_id)
+    return render(request, 'onlinecourse/course_detail_bootstrap.html', {'course': course})
+
+def submit(request, course_id):
+    course = get_object_or_404(Course, pk=course_id)
+    if request.method == 'POST':
+        # Get selected choice IDs from POST request
+        selected_ids = []
+        for key, value in request.POST.items():
+            if key.startswith('choice_'):
+                selected_ids.append(int(value))
+        
+        # Get or create enrollment for user
+        enrollment, created = Enrollment.objects.get_or_create(course=course)
+        
+        # Create submission instance
+        submission = Submission.objects.create(enrollment=enrollment)
+        submission.choices.set(selected_ids)
+        submission.save()
+        
+        return redirect('onlinecourse:show_exam_result', course_id=course.id, submission_id=submission.id)
+    
+    return redirect('onlinecourse:course_details', course_id=course.id)
+
+def show_exam_result(request, course_id, submission_id):
+    course = get_object_or_404(Course, pk=course_id)
+    submission = get_object_or_404(Submission, pk=submission_id)
+    
+    selected_ids = list(submission.choices.values_list('id', flat=True))
+    
+    total_score = 0
+    grade = 0
+    
+    # Calculate grade/score
+    for lesson in course.lesson_set.all():
+        for question in lesson.question_set.all():
+            total_score += question.grade
+            if question.is_get_score(selected_ids):
+                grade += question.grade
+                
+    context = {
+        'course': course,
+        'selected_ids': selected_ids,
+        'grade': grade,
+        'total_score': total_score,
+        'submission': submission
+    }
+    return render(request, 'onlinecourse/exam_result_bootstrap.html', context)
